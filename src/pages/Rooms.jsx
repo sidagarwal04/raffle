@@ -52,7 +52,7 @@ export function Rooms() {
   return (
     <main className="sheet top">
       <AccountBar user={user} next="/rooms" />
-      <p className="mark">Spin Fiesta</p>
+      <p className="mark">Raffle</p>
       <h1>Your rooms</h1>
       <p className="lede">Rooms you open, and rooms other people invite you to run.</p>
       <Link className="btn primary" to="/draw">

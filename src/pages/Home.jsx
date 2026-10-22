@@ -44,8 +44,8 @@ export function Home() {
       <AccountBar user={user} next="/" />
       {AUTH_NOTE[params.get("auth")] ? <p className="error">{AUTH_NOTE[params.get("auth")]}</p> : null}
       <p className="mark brand">
-        <img className="brand-mark" src="/favicon.svg" alt="" />
-        Spin Fiesta
+        <img className="brand-mark" src="/icon.png" alt="" />
+        Raffle
       </p>
       <h1>A room. A code. A winner.</h1>
       <p className="lede">

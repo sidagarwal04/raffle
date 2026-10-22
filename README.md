@@ -1,6 +1,6 @@
 # Raffle
 
-Spin Fiesta is a live raffle for meetups, booths, and livestreams. Guests join a room with a short code. The host draws a winner on the big screen.
+Raffle is a live draw for meetups, booths, and livestreams. Guests join a room with a short code. The host draws a winner on the big screen.
 
 ## What it does
 

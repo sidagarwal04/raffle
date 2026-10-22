@@ -47,49 +47,42 @@ export function Collaborators({ code, collaborators = [], invites = [], canRemov
   ];
 
   return (
-    <section className="collab">
-      <h2>Collaborators</h2>
-      <p className="muted">Invite someone to run this room with you. They can draw on another screen.</p>
-      <form className="stack-form" onSubmit={submit}>
-        <label htmlFor={`collab-${code}`}>
-          Google email
-          <input
-            id={`collab-${code}`}
-            type="email"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            placeholder="alex@company.com"
-            autoCapitalize="none"
-            autoCorrect="off"
-            spellCheck="false"
-            required
-          />
+    <section className="invite-line">
+      <form className="inline" onSubmit={submit}>
+        <label className="sr" htmlFor={`collab-${code}`}>
+          Collaborator’s Google email
         </label>
+        <input
+          id={`collab-${code}`}
+          type="email"
+          value={email}
+          onChange={(event) => setEmail(event.target.value)}
+          placeholder="Invite a collaborator"
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck="false"
+          required
+        />
         <button className="btn ghost" type="submit" disabled={busy}>
           {busy ? "Inviting…" : "Invite"}
         </button>
       </form>
       {people.length ? (
-        <ul className="people">
+        <ul className="chips">
           {people.map((person) => (
             <li key={`${person.waiting ? "wait" : "in"}-${person.email}`}>
-              <span>
-                <strong>{person.name || person.email}</strong>
-                {person.name ? <em>{person.email}</em> : null}
-                <em>{person.waiting ? "Waiting on the link" : "On the room"}</em>
-              </span>
-              <span className="inline">
-                {person.token ? (
-                  <button className="btn ghost" type="button" onClick={() => copy(person.email, person.token)}>
-                    {copied === person.email ? "Copied" : "Copy link"}
-                  </button>
-                ) : null}
-                {canRemove ? (
-                  <button className="text-btn" type="button" onClick={() => remove(person.email)}>
-                    Remove
-                  </button>
-                ) : null}
-              </span>
+              <span>{person.name || person.email}</span>
+              {person.waiting ? <em>{copied === person.email ? "Copied" : "Waiting"}</em> : <em>In</em>}
+              {person.token ? (
+                <button className="text-btn" type="button" onClick={() => copy(person.email, person.token)}>
+                  Copy link
+                </button>
+              ) : null}
+              {canRemove ? (
+                <button className="text-btn" type="button" onClick={() => remove(person.email)}>
+                  Remove
+                </button>
+              ) : null}
             </li>
           ))}
         </ul>

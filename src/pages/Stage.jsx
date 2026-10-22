@@ -118,7 +118,7 @@ export function Stage() {
   }, [room?.reveal, room?.prize]);
 
   useEffect(() => {
-    document.title = room?.title ? `${room.title} · Spin Fiesta` : "Spin Fiesta";
+    document.title = room?.title ? `${room.title} · Raffle` : "Raffle";
   }, [room?.title]);
 
   const entryKey = (room?.entries || []).map((entry) => entry.id).join("|");
@@ -259,7 +259,7 @@ export function Stage() {
   if (missing) {
     return (
       <main className="sheet">
-        <p className="mark">Spin Fiesta</p>
+        <p className="mark">Raffle</p>
         <h1>That code doesn’t match a room.</h1>
         <Link className="btn ghost" to="/">
           Back home
@@ -278,7 +278,7 @@ export function Stage() {
     <div className={hosting ? "stage-shell hosting" : "stage-shell"}>
       <section className={presenting ? "stage presenting" : "stage"}>
         <header className="stage-top">
-          <p className="mark">{room?.title || "Spin Fiesta"}</p>
+          <p className="mark">{room?.title || "Raffle"}</p>
           <p className="live">
             <span className="pip" />
             {room ? `${room.count} in the draw` : "Connecting"}

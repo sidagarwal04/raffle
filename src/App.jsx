@@ -19,7 +19,7 @@ export function App() {
         path="*"
         element={
           <main className="sheet">
-            <p className="mark">Spin Fiesta</p>
+            <p className="mark">Raffle</p>
             <h1>That page isn’t here.</h1>
             <a className="btn primary" href="/">
               Back home

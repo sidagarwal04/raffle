@@ -1,7 +1,6 @@
 import crypto from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { OAuth2Client } from "google-auth-library";
 import { loadEnv } from "./env.js";
 import { StoreError } from "./store.js";
 
@@ -155,13 +154,6 @@ async function run(fn) {
 }
 
 export async function dispatch(request) {
-  let store;
-  try {
-    store = await getStore();
-  } catch (err) {
-    console.error(err);
-    return json(500, { error: err.expose || "Something went wrong." });
-  }
   const method = request.method.toUpperCase();
   const path = request.path.replace(/\/+$/, "") || "/";
   const matched = route(path);
@@ -174,8 +166,10 @@ export async function dispatch(request) {
 
   const user = userFrom(headers);
 
+  // These routes only read or write the login cookie. Opening the room store
+  // first makes every page wait on Blobs before it can leave "Checking sign-in…".
   if (matched.name === "auth-me" && method === "GET") {
-    return json(200, { user });
+    return json(200, { user: user || null });
   }
 
   if (matched.name === "auth-logout" && method === "POST") {
@@ -227,6 +221,7 @@ export async function dispatch(request) {
       });
       const token = await tokenRes.json().catch(() => ({}));
       if (!tokenRes.ok || !token.id_token) return failed;
+      const { OAuth2Client } = await import("google-auth-library");
       const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
       const ticket = await client.verifyIdToken({
         idToken: token.id_token,
@@ -248,6 +243,14 @@ export async function dispatch(request) {
       console.error(err);
       return failed;
     }
+  }
+
+  let store;
+  try {
+    store = await getStore();
+  } catch (err) {
+    console.error(err);
+    return json(500, { error: err.expose || "Something went wrong." });
   }
 
   if (matched.name === "my-rooms" && method === "GET") {

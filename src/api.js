@@ -41,7 +41,7 @@ export const api = {
   acceptInvite: (token) => request(`/api/invites/${token}/accept`, { method: "POST" }),
   me: async () => {
     const data = await request("/api/auth/me");
-    return data.user;
+    return data.user || null;
   },
   rooms: () => request("/api/me/rooms"),
   logout: () => request("/api/auth/logout", { method: "POST" }),

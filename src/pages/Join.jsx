@@ -88,7 +88,7 @@ export function Join() {
   if (missing) {
     return (
       <main className="sheet">
-        <p className="mark">Spin Fiesta</p>
+        <p className="mark">Raffle</p>
         <h1>That code doesn’t match a room.</h1>
         <Link className="btn ghost" to="/">
           Try another
@@ -104,7 +104,7 @@ export function Join() {
     const prize = won ? room.latestDraw.prize : earlierWin.prize;
     return (
       <main className="sheet won">
-        <p className="mark">{room?.title || "Spin Fiesta"}</p>
+        <p className="mark">{room?.title || "Raffle"}</p>
         <h1>You won</h1>
         <p className="prize-lg">{prize}</p>
         <p className="muted">{entry.name}</p>
@@ -127,16 +127,16 @@ export function Join() {
         <p className="mark">{room?.title || code}</p>
         <h1>You’re in.</h1>
         <p className="lede">
-          {entry.name}. {room ? `${room.count} in the draw.` : "Watch the big screen."}
+          {entry.name}
+          {room ? ` · ${room.count} in the draw` : ""}. Keep this open. It flips if you win.
         </p>
-        <p className="muted">This page flips if this phone wins.</p>
       </main>
     );
   }
 
   return (
     <main className="sheet">
-      <p className="mark">{room?.title || "Spin Fiesta"}</p>
+      <p className="mark">{room?.title || "Raffle"}</p>
       <h1>{room?.prize ? `Win a ${room.prize}` : "Join the draw"}</h1>
       <p className="lede">Code {code}. Your name is the whole sign-up.</p>
       {room?.locked ? (
