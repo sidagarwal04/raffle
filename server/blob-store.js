@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import {
   StoreError,
   checkedIn,
+  cleanEmail,
   cleanLine,
   cleanName,
   cleanToken,
@@ -30,6 +31,36 @@ function roomKey(code) {
 
 function indexKey(sub, code) {
   return `${ownerPrefix(sub)}${code}`;
+}
+
+function emailKey(email) {
+  return Buffer.from(String(email)).toString("base64url");
+}
+
+function inviteIndexKey(email, code) {
+  return `inv/${emailKey(email)}/${code}`;
+}
+
+function inviteTokenKey(token) {
+  return `invite/${token}`;
+}
+
+function memberRole(doc, userSub) {
+  if (userSub && doc.ownerSub && doc.ownerSub === userSub) return "owner";
+  if ((doc.collaborators || []).some((person) => person.sub === userSub)) return "collaborator";
+  return "pin";
+}
+
+function peopleOf(doc) {
+  return {
+    collaborators: (doc.collaborators || []).map((person) => ({ email: person.email, name: person.name })),
+    invites: (doc.invites || []).map((invite) => ({ email: invite.email, token: invite.token })),
+  };
+}
+
+function accountOf(userOrSub) {
+  if (userOrSub && typeof userOrSub === "object") return userOrSub;
+  return { sub: userOrSub || "", email: "", name: "" };
 }
 
 function labeled(entries) {
@@ -94,7 +125,7 @@ function present(doc, { host = false } = {}) {
 }
 
 function assertHost(doc, pin, userSub) {
-  if (userSub && doc.ownerSub && doc.ownerSub === userSub) return;
+  if (memberRole(doc, userSub) !== "pin") return;
   const attempt = cleanLine(pin, 20).toUpperCase();
   if (!attempt || !pinsMatch(attempt, doc.pinHash)) throw new StoreError("Wrong pin.", 403);
 }
@@ -105,10 +136,50 @@ export function createBlobStore(blobs) {
     return found?.data || null;
   }
 
-  async function write(doc, options) {
+  async function removeKey(key) {
+    if (typeof blobs.delete === "function") await blobs.delete(key);
+  }
+
+  async function syncIndexes(doc, previous) {
+    const base = summary(doc);
+    if (doc.ownerSub) await blobs.setJSON(indexKey(doc.ownerSub, doc.code), { ...base, role: "owner" });
+    const nextPeople = new Map((doc.collaborators || []).map((person) => [person.sub, person]));
+    const prevPeople = new Map((previous?.collaborators || []).map((person) => [person.sub, person]));
+    for (const sub of nextPeople.keys()) {
+      if (sub && sub !== doc.ownerSub) {
+        await blobs.setJSON(indexKey(sub, doc.code), { ...base, role: "collaborator" });
+      }
+    }
+    for (const sub of prevPeople.keys()) {
+      if (!nextPeople.has(sub) && sub !== doc.ownerSub) await removeKey(indexKey(sub, doc.code));
+    }
+    const nextInvites = new Map((doc.invites || []).map((invite) => [invite.email, invite]));
+    const prevInvites = new Map((previous?.invites || []).map((invite) => [invite.email, invite]));
+    for (const invite of nextInvites.values()) {
+      await blobs.setJSON(inviteIndexKey(invite.email, doc.code), {
+        token: invite.token,
+        email: invite.email,
+        code: doc.code,
+      });
+      await blobs.setJSON(inviteTokenKey(invite.token), {
+        token: invite.token,
+        email: invite.email,
+        code: doc.code,
+        title: doc.title,
+      });
+    }
+    for (const invite of prevInvites.values()) {
+      if (!nextInvites.has(invite.email)) await removeKey(inviteIndexKey(invite.email, doc.code));
+      if (![...nextInvites.values()].some((item) => item.token === invite.token)) {
+        await removeKey(inviteTokenKey(invite.token));
+      }
+    }
+  }
+
+  async function write(doc, options, previous = null) {
     const result = await blobs.setJSON(roomKey(doc.code), doc, options);
     if (!result.modified) return false;
-    if (doc.ownerSub) await blobs.setJSON(indexKey(doc.ownerSub, doc.code), summary(doc));
+    await syncIndexes(doc, previous);
     return true;
   }
 
@@ -117,8 +188,9 @@ export function createBlobStore(blobs) {
     for (let attempt = 0; attempt < 6; attempt++) {
       const current = await blobs.getWithMetadata(key, { type: "json" });
       if (!current?.data) throw new StoreError("That code doesn't match a room.", 404);
+      const previous = structuredClone(current.data);
       const next = change(structuredClone(current.data));
-      const saved = await write(next, current.etag ? { onlyIfMatch: current.etag } : {});
+      const saved = await write(next, current.etag ? { onlyIfMatch: current.etag } : {}, previous);
       if (saved) return next;
     }
     throw new StoreError("Could not save the room. Try again.", 503);
@@ -151,6 +223,8 @@ export function createBlobStore(blobs) {
           reveal: "wheel",
           createdAt: Date.now(),
           ownerSub: input.ownerSub || null,
+          collaborators: [],
+          invites: [],
           entries: [],
           draws: [],
         };
@@ -321,10 +395,101 @@ export function createBlobStore(blobs) {
       return { ...present(doc, { host: true }), added, unchecked, duplicates };
     },
 
-    async roomsForUser(sub) {
-      const listed = await blobs.list({ prefix: ownerPrefix(sub) });
+    async inviteCollaborator(code, user, emailInput) {
+      if (!user?.sub) throw new StoreError("Sign in with Google.", 401);
+      const email = cleanEmail(emailInput);
+      if (!email) throw new StoreError("Enter a Google email.");
+      if (cleanEmail(user.email) === email) throw new StoreError("You’re already on this room.");
+      let token = "";
+      let already = false;
+      const doc = await update(code, (room) => {
+        const role = memberRole(room, user.sub);
+        if (role !== "owner" && role !== "collaborator") {
+          throw new StoreError("Only people on this room can invite.", 403);
+        }
+        room.collaborators = room.collaborators || [];
+        room.invites = room.invites || [];
+        if (room.collaborators.some((person) => person.email === email)) {
+          throw new StoreError("They’re already on this room.");
+        }
+        const pending = room.invites.find((invite) => invite.email === email);
+        if (pending) {
+          token = pending.token;
+          already = true;
+          return room;
+        }
+        token = randomToken(16);
+        room.invites.push({ token, email, createdAt: Date.now() });
+        return room;
+      });
+      return { token, email, already, ...peopleOf(doc) };
+    },
+
+    async removeCollaborator(code, user, emailInput) {
+      if (!user?.sub) throw new StoreError("Sign in with Google.", 401);
+      const email = cleanEmail(emailInput);
+      if (!email) throw new StoreError("That email isn’t on this room.");
+      const doc = await update(code, (room) => {
+        if (memberRole(room, user.sub) !== "owner") {
+          throw new StoreError("Only the person who opened the room can remove someone.", 403);
+        }
+        room.collaborators = (room.collaborators || []).filter((person) => person.email !== email);
+        room.invites = (room.invites || []).filter((invite) => invite.email !== email);
+        return room;
+      });
+      return peopleOf(doc);
+    },
+
+    async previewInvite(token) {
+      const invite = await blobs.get(inviteTokenKey(String(token || "").toUpperCase()), { type: "json" });
+      if (!invite?.code) throw new StoreError("That invite isn’t valid anymore.", 404);
+      return { email: invite.email, code: invite.code, title: invite.title };
+    },
+
+    async acceptInvite(token, user) {
+      if (!user?.sub || !user.email) throw new StoreError("Sign in with Google.", 401);
+      const email = cleanEmail(user.email);
+      const invite = await blobs.get(inviteTokenKey(String(token || "").toUpperCase()), { type: "json" });
+      if (!invite?.code) throw new StoreError("That invite isn’t valid anymore.", 404);
+      if (invite.email !== email) throw new StoreError("This invite is for a different Google account.", 403);
+      const doc = await update(invite.code, (room) => {
+        room.collaborators = room.collaborators || [];
+        room.invites = (room.invites || []).filter((item) => item.email !== email);
+        if (room.ownerSub === user.sub) return room;
+        if (!room.collaborators.some((person) => person.sub === user.sub)) {
+          room.collaborators.push({
+            sub: user.sub,
+            email,
+            name: cleanLine(user.name, 80) || email,
+            createdAt: Date.now(),
+          });
+        }
+        return room;
+      });
+      return { code: doc.code, title: doc.title };
+    },
+
+    async roomsForUser(userOrSub) {
+      const user = accountOf(userOrSub);
+      const email = cleanEmail(user.email || "");
+      if (user.sub && email) {
+        const pending = await blobs.list({ prefix: `inv/${emailKey(email)}/` });
+        for (const blob of pending.blobs) {
+          const invite = await blobs.get(blob.key, { type: "json" });
+          if (!invite?.token) continue;
+          try {
+            await this.acceptInvite(invite.token, user);
+          } catch (err) {
+            if (!(err instanceof StoreError)) throw err;
+          }
+        }
+      }
+      const listed = await blobs.list({ prefix: ownerPrefix(user.sub) });
       const rooms = await Promise.all(listed.blobs.map((blob) => blobs.get(blob.key, { type: "json" })));
-      return rooms.filter(Boolean).sort((a, b) => b.createdAt - a.createdAt);
+      return rooms
+        .filter(Boolean)
+        .map((room) => ({ ...room, role: room.role || "owner" }))
+        .sort((a, b) => b.createdAt - a.createdAt);
     },
 
     async publicRoom(code) {
@@ -334,7 +499,15 @@ export function createBlobStore(blobs) {
     async hostRoom(code, pin, userSub) {
       const doc = await require(code);
       assertHost(doc, pin, userSub);
-      return present(doc, { host: true });
+      const body = present(doc, { host: true });
+      const role = memberRole(doc, userSub);
+      body.access = role;
+      if (role === "owner" || role === "collaborator") {
+        const people = peopleOf(doc);
+        body.collaborators = people.collaborators;
+        body.invites = people.invites;
+      }
+      return body;
     },
 
     async close() {},

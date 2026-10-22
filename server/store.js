@@ -45,6 +45,12 @@ export function cleanName(value) {
   return cleanLine(value, 40);
 }
 
+export function cleanEmail(value) {
+  const email = cleanLine(value, 120).toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return "";
+  return email;
+}
+
 export function normName(value) {
   return cleanName(value).toLowerCase();
 }
@@ -205,14 +211,59 @@ export async function createStoreFromDb(db) {
     return room;
   }
 
+  async function collaboratorRow(code, userSub) {
+    if (!userSub) return null;
+    return db.get("SELECT email, name FROM collaborators WHERE room_code = ? AND user_sub = ?", [
+      code,
+      userSub,
+    ]);
+  }
+
   async function requireHost(code, pin, userSub) {
     const room = await requireRoom(code);
     if (userSub && room.owner_sub && room.owner_sub === userSub) return room;
+    if (await collaboratorRow(room.code, userSub)) return room;
     const attempt = cleanLine(pin, 20).toUpperCase();
     if (!attempt || !pinsMatch(attempt, room.pin_hash)) {
       throw new StoreError("Wrong pin.", 403);
     }
     return room;
+  }
+
+  async function memberRole(room, userSub) {
+    if (userSub && room.owner_sub && room.owner_sub === userSub) return "owner";
+    if (await collaboratorRow(room.code, userSub)) return "collaborator";
+    return "pin";
+  }
+
+  async function requireMember(code, user) {
+    if (!user?.sub) throw new StoreError("Sign in with Google.", 401);
+    const room = await requireRoom(code);
+    const role = await memberRole(room, user.sub);
+    if (role !== "owner" && role !== "collaborator") {
+      throw new StoreError("Only people on this room can invite.", 403);
+    }
+    return { room, role };
+  }
+
+  async function peopleForRoom(code) {
+    const members = await db.all(
+      "SELECT email, name FROM collaborators WHERE room_code = ? ORDER BY created_at ASC",
+      [code],
+    );
+    const pending = await db.all(
+      "SELECT email, token FROM invites WHERE room_code = ? ORDER BY created_at ASC",
+      [code],
+    );
+    return {
+      collaborators: members.map((row) => ({ email: row.email, name: row.name })),
+      invites: pending.map((row) => ({ email: row.email, token: row.token })),
+    };
+  }
+
+  function accountOf(userOrSub) {
+    if (userOrSub && typeof userOrSub === "object") return userOrSub;
+    return { sub: userOrSub || "", email: "", name: "" };
   }
 
   async function entriesForRoom(code) {
@@ -448,17 +499,101 @@ export async function createStoreFromDb(db) {
     return { ...(await present(await requireRoom(room.code), { host: true })), added, unchecked, duplicates };
   }
 
-  async function roomsForUser(sub) {
+  async function inviteCollaborator(code, user, emailInput) {
+    const { room } = await requireMember(code, user);
+    const email = cleanEmail(emailInput);
+    if (!email) throw new StoreError("Enter a Google email.");
+    if (cleanEmail(user.email) === email) throw new StoreError("You’re already on this room.");
+    const joined = await db.get("SELECT 1 AS ok FROM collaborators WHERE room_code = ? AND email = ?", [
+      room.code,
+      email,
+    ]);
+    if (joined) throw new StoreError("They’re already on this room.");
+    const pending = await db.get("SELECT token FROM invites WHERE room_code = ? AND email = ?", [
+      room.code,
+      email,
+    ]);
+    if (pending) return { token: pending.token, email, already: true, ...(await peopleForRoom(room.code)) };
+    const token = randomToken(16);
+    await db.run("INSERT INTO invites (token, room_code, email, created_at) VALUES (?, ?, ?, ?)", [
+      token,
+      room.code,
+      email,
+      Date.now(),
+    ]);
+    return { token, email, ...(await peopleForRoom(room.code)) };
+  }
+
+  async function removeCollaborator(code, user, emailInput) {
+    const { room, role } = await requireMember(code, user);
+    if (role !== "owner") throw new StoreError("Only the person who opened the room can remove someone.", 403);
+    const email = cleanEmail(emailInput);
+    if (!email) throw new StoreError("That email isn’t on this room.");
+    await db.run("DELETE FROM collaborators WHERE room_code = ? AND email = ?", [room.code, email]);
+    await db.run("DELETE FROM invites WHERE room_code = ? AND email = ?", [room.code, email]);
+    return peopleForRoom(room.code);
+  }
+
+  async function previewInvite(token) {
+    const invite = await db.get(
+      `SELECT i.email, i.room_code, r.title
+       FROM invites i JOIN rooms r ON r.code = i.room_code
+       WHERE i.token = ?`,
+      [String(token || "").toUpperCase()],
+    );
+    if (!invite) throw new StoreError("That invite isn’t valid anymore.", 404);
+    return { email: invite.email, code: invite.room_code, title: invite.title };
+  }
+
+  async function acceptInvite(token, user) {
+    if (!user?.sub || !user.email) throw new StoreError("Sign in with Google.", 401);
+    const invite = await db.get("SELECT * FROM invites WHERE token = ?", [String(token || "").toUpperCase()]);
+    if (!invite) throw new StoreError("That invite isn’t valid anymore.", 404);
+    const email = cleanEmail(user.email);
+    if (email !== invite.email) throw new StoreError("This invite is for a different Google account.", 403);
+    const room = await requireRoom(invite.room_code);
+    if (room.owner_sub !== user.sub) {
+      const name = cleanLine(user.name, 80) || email;
+      await db.run(
+        `INSERT INTO collaborators (room_code, user_sub, email, name, created_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(room_code, user_sub) DO UPDATE SET email = excluded.email, name = excluded.name`,
+        [room.code, user.sub, email, name, Date.now()],
+      );
+    }
+    await db.run("DELETE FROM invites WHERE room_code = ? AND email = ?", [room.code, email]);
+    return { code: room.code, title: room.title };
+  }
+
+  async function claimInvites(user) {
+    const email = cleanEmail(user?.email);
+    if (!user?.sub || !email) return;
+    const pending = await db.all("SELECT token FROM invites WHERE email = ?", [email]);
+    for (const invite of pending) {
+      try {
+        await acceptInvite(invite.token, user);
+      } catch (err) {
+        if (!(err instanceof StoreError)) throw err;
+      }
+    }
+  }
+
+  async function roomsForUser(userOrSub) {
+    const user = accountOf(userOrSub);
+    await claimInvites(user);
+    const sub = user.sub;
     const rows = await db.all(
       `SELECT r.code, r.title, r.prize, r.style, r.locked, r.created_at,
+        CASE WHEN r.owner_sub = ? THEN 'owner' ELSE 'collaborator' END AS role,
         (SELECT COUNT(*) FROM entries e WHERE e.room_code = r.code AND e.eligible = 1) AS eligible_count,
         (SELECT name FROM draws d WHERE d.room_code = r.code ORDER BY d.created_at DESC, d.rowid DESC LIMIT 1) AS latest_name,
         (SELECT prize FROM draws d WHERE d.room_code = r.code ORDER BY d.created_at DESC, d.rowid DESC LIMIT 1) AS latest_prize,
         (SELECT created_at FROM draws d WHERE d.room_code = r.code ORDER BY d.created_at DESC, d.rowid DESC LIMIT 1) AS latest_at
        FROM rooms r
        WHERE r.owner_sub = ?
+          OR r.code IN (SELECT room_code FROM collaborators WHERE user_sub = ?)
        ORDER BY r.created_at DESC`,
-      [sub],
+      [sub, sub, sub],
     );
     return rows.map((row) => ({
       code: row.code,
@@ -466,6 +601,7 @@ export async function createStoreFromDb(db) {
       prize: row.prize,
       style: row.style,
       locked: on(row.locked),
+      role: row.role,
       createdAt: Number(row.created_at),
       count: Number(row.eligible_count),
       latestName: row.latest_name || "",
@@ -528,6 +664,10 @@ export async function createStoreFromDb(db) {
     updatePrize,
     updateReveal,
     importCsv,
+    inviteCollaborator,
+    removeCollaborator,
+    previewInvite,
+    acceptInvite,
     roomsForUser,
     upsertUser,
     createSession,
@@ -537,7 +677,16 @@ export async function createStoreFromDb(db) {
       return present(await requireRoom(code));
     },
     async hostRoom(code, pin, userSub) {
-      return present(await requireHost(code, pin, userSub), { host: true });
+      const room = await requireHost(code, pin, userSub);
+      const body = await present(room, { host: true });
+      const role = await memberRole(room, userSub);
+      body.access = role;
+      if (role === "owner" || role === "collaborator") {
+        const people = await peopleForRoom(room.code);
+        body.collaborators = people.collaborators;
+        body.invites = people.invites;
+      }
+      return body;
     },
     close() {
       return db.close();

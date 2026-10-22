@@ -33,6 +33,12 @@ export const api = {
     request(`/api/rooms/${code}/reveal`, { method: "POST", pin, body: { reveal } }),
   importCsv: (code, pin, csv) =>
     request(`/api/rooms/${code}/import`, { method: "POST", pin, body: { csv } }),
+  inviteCollaborator: (code, email) =>
+    request(`/api/rooms/${code}/collaborators`, { method: "POST", body: { email } }),
+  removeCollaborator: (code, email) =>
+    request(`/api/rooms/${code}/collaborators`, { method: "DELETE", body: { email } }),
+  getInvite: (token) => request(`/api/invites/${token}`),
+  acceptInvite: (token) => request(`/api/invites/${token}/accept`, { method: "POST" }),
   me: async () => {
     const data = await request("/api/auth/me");
     return data.user;

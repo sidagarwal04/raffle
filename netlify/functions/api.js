@@ -6,6 +6,8 @@ const PATHS = [
   "/api/auth/logout",
   "/api/auth/me",
   "/api/me/rooms",
+  "/api/invites/:token",
+  "/api/invites/:token/accept",
   "/api/rooms",
   "/api/rooms/:code",
   "/api/rooms/:code/:action",

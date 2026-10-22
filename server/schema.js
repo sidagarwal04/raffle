@@ -27,6 +27,26 @@ CREATE TABLE IF NOT EXISTS rooms (
 
 CREATE INDEX IF NOT EXISTS rooms_owner ON rooms (owner_sub);
 
+CREATE TABLE IF NOT EXISTS collaborators (
+  room_code TEXT NOT NULL,
+  user_sub TEXT NOT NULL,
+  email TEXT NOT NULL,
+  name TEXT NOT NULL,
+  created_at BIGINT NOT NULL,
+  PRIMARY KEY (room_code, user_sub)
+);
+
+CREATE INDEX IF NOT EXISTS collaborators_user ON collaborators (user_sub);
+
+CREATE TABLE IF NOT EXISTS invites (
+  token TEXT PRIMARY KEY,
+  room_code TEXT NOT NULL,
+  email TEXT NOT NULL,
+  created_at BIGINT NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS invites_room_email ON invites (room_code, email);
+
 CREATE TABLE IF NOT EXISTS entries (
   id TEXT PRIMARY KEY,
   room_code TEXT NOT NULL,

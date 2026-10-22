@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { useSession } from "../Account.jsx";
+import { AccountBar, useSession } from "../Account.jsx";
 import { api, savePin } from "../api.js";
+import { Collaborators } from "../Collaborators.jsx";
 
 const STYLES = [
   {
@@ -79,10 +80,23 @@ export function Create() {
     );
   }
 
+  function applyPeople(result) {
+    setRoom((current) =>
+      current
+        ? {
+            ...current,
+            collaborators: result.collaborators || [],
+            invites: result.invites || [],
+          }
+        : current,
+    );
+  }
+
   if (room) {
     const joinUrl = `${location.origin}/j/${room.code}`;
     return (
-      <main className="sheet">
+      <main className="sheet top">
+        <AccountBar user={user} next="/draw" rooms />
         <p className="mark">Room open</p>
         <h1 className="code-sm">{room.code}</h1>
         <p className="lede">
@@ -104,12 +118,20 @@ export function Create() {
             {copied === "link" ? "Link copied" : "Copy join link"}
           </button>
         </div>
+        <Collaborators
+          code={room.code}
+          collaborators={room.collaborators}
+          invites={room.invites}
+          canRemove
+          onUpdate={applyPeople}
+        />
       </main>
     );
   }
 
   return (
     <main className="sheet">
+      <AccountBar user={user} next="/draw" rooms />
       <p className="mark">New room</p>
       <h1>Set the prize, then share a code.</h1>
       <form className="stack-form" onSubmit={submit}>

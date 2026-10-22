@@ -135,8 +135,10 @@ function route(path) {
   if (path === "/api/auth/me") return { name: "auth-me" };
   if (path === "/api/me/rooms") return { name: "my-rooms" };
   if (path === "/api/rooms") return { name: "rooms" };
+  const invite = path.match(/^\/api\/invites\/([A-Za-z0-9]{8,32})(?:\/(accept))?$/);
+  if (invite) return { name: "invite", token: invite[1].toUpperCase(), action: invite[2] || "" };
   const room = path.match(
-    /^\/api\/rooms\/([A-Za-z0-9]{4})(?:\/(host|join|draw|redraw|lock|prize|reveal|import))?$/,
+    /^\/api\/rooms\/([A-Za-z0-9]{4})(?:\/(host|join|draw|redraw|lock|prize|reveal|import|collaborators))?$/,
   );
   if (room) return { name: "room", code: room[1].toUpperCase(), action: room[2] || "" };
   return null;
@@ -250,7 +252,16 @@ export async function dispatch(request) {
 
   if (matched.name === "my-rooms" && method === "GET") {
     if (!user) return json(401, { error: "Sign in with Google." });
-    return run(async () => json(200, { rooms: await store.roomsForUser(user.sub) }));
+    return run(async () => json(200, { rooms: await store.roomsForUser(user) }));
+  }
+
+  if (matched.name === "invite" && !matched.action && method === "GET") {
+    return run(async () => json(200, await store.previewInvite(matched.token)));
+  }
+
+  if (matched.name === "invite" && matched.action === "accept" && method === "POST") {
+    if (!user) return json(401, { error: "Sign in with Google." });
+    return run(async () => json(200, await store.acceptInvite(matched.token, user)));
   }
 
   if (matched.name === "rooms" && method === "POST") {
@@ -307,6 +318,16 @@ export async function dispatch(request) {
     return run(async () =>
       json(200, await store.importCsv(matched.code, pinFrom(headers, body), body.csv || "", user?.sub)),
     );
+  }
+
+  if (matched.name === "room" && matched.action === "collaborators" && method === "POST") {
+    if (!user) return json(401, { error: "Sign in with Google." });
+    return run(async () => json(200, await store.inviteCollaborator(matched.code, user, body.email)));
+  }
+
+  if (matched.name === "room" && matched.action === "collaborators" && method === "DELETE") {
+    if (!user) return json(401, { error: "Sign in with Google." });
+    return run(async () => json(200, await store.removeCollaborator(matched.code, user, body.email)));
   }
 
   return json(404, { error: "That page isn’t here." });

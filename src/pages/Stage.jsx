@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import QRCode from "qrcode";
 import { api, cleanCode, clearPin, roomPin, savePin } from "../api.js";
+import { Collaborators } from "../Collaborators.jsx";
 import { Confetti, Odometer, Reel, WinnerCard } from "../show.jsx";
 
 const REVEALS = [
@@ -362,7 +363,7 @@ export function Stage() {
                     </span>
                   ))
                 ) : (
-                  <p className="lede">Names land here as people join.</p>
+                  <p className="name-empty">Names land here as people join.</p>
                 )}
               </div>
             </div>
@@ -498,6 +499,25 @@ export function Stage() {
               <p className="muted">
                 Open this page from this computer’s network address so phones can reach the QR.
               </p>
+            ) : null}
+            {room.access === "owner" || room.access === "collaborator" ? (
+              <Collaborators
+                code={code}
+                collaborators={room.collaborators}
+                invites={room.invites}
+                canRemove={room.access === "owner"}
+                onUpdate={(result) =>
+                  setRoom((current) =>
+                    current
+                      ? {
+                          ...current,
+                          collaborators: result.collaborators || [],
+                          invites: result.invites || [],
+                        }
+                      : current,
+                  )
+                }
+              />
             ) : null}
             {notice ? <p className="notice">{notice}</p> : null}
             {error ? <p className="error">{error}</p> : null}

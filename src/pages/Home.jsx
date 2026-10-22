@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { AccountBar, useSession } from "../Account.jsx";
 import { api, cleanCode } from "../api.js";
+import { RoomList } from "../RoomList.jsx";
 
 const AUTH_NOTE = {
   error: "Google sign-in didn’t complete. Try again.",
@@ -42,7 +43,10 @@ export function Home() {
     <main className="sheet">
       <AccountBar user={user} next="/" />
       {AUTH_NOTE[params.get("auth")] ? <p className="error">{AUTH_NOTE[params.get("auth")]}</p> : null}
-      <p className="mark">Spin Fiesta</p>
+      <p className="mark brand">
+        <img className="brand-mark" src="/favicon.svg" alt="" />
+        Spin Fiesta
+      </p>
       <h1>A room. A code. A winner.</h1>
       <p className="lede">
         For meetups, booths, and livestreams. People join with a name. You draw
@@ -72,26 +76,7 @@ export function Home() {
       {user ? (
         <section className="saved-block">
           <h2>Your rooms</h2>
-          {rooms.length ? (
-            <ul className="saved">
-              {rooms.map((room) => (
-                <li key={room.code}>
-                  <Link to={`/s/${room.code}`}>
-                    <span>
-                      <strong>{room.code}</strong>
-                      <em>
-                        {room.title}
-                        {room.latestName ? ` · ${room.latestName}` : " · No draw yet"}
-                      </em>
-                    </span>
-                    <em>{room.count} in</em>
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="muted">Rooms you open are saved here.</p>
-          )}
+          <RoomList rooms={rooms} />
         </section>
       ) : null}
     </main>

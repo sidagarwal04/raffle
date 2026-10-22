@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { api } from "./api.js";
 
 export function useSession() {
@@ -22,7 +23,7 @@ export function useSession() {
   return user;
 }
 
-export function AccountBar({ user, next }) {
+export function AccountBar({ user, next, rooms = false }) {
   if (user === undefined) return <p className="muted">Checking sign-in…</p>;
   if (!user) {
     return (
@@ -33,17 +34,20 @@ export function AccountBar({ user, next }) {
   }
   return (
     <div className="account">
-      <span>{user.name || user.email}</span>
-      <button
-        className="text-btn"
-        type="button"
-        onClick={async () => {
-          await api.logout();
-          location.href = "/";
-        }}
-      >
-        Sign out
-      </button>
+      {rooms ? <Link to="/rooms">Your rooms</Link> : <span>{user.name || user.email}</span>}
+      <span className="account-side">
+        {rooms ? <span>{user.name || user.email}</span> : null}
+        <button
+          className="text-btn"
+          type="button"
+          onClick={async () => {
+            await api.logout();
+            location.href = "/";
+          }}
+        >
+          Sign out
+        </button>
+      </span>
     </div>
   );
 }

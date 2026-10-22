@@ -97,6 +97,62 @@ test("a signed-in host can open saved rooms without the pin", async () => {
   await store.close();
 });
 
+test("an invited collaborator can host and finds the room on their account", async () => {
+  const store = await createStore(":memory:");
+  const room = await store.createRoom({
+    title: "Friday meetup",
+    prize: "T-shirt",
+    style: "meetup",
+    ownerSub: "owner-sub",
+  });
+  await store.join(room.code, { name: "Priya Shah", token: "token-token-token-0" });
+  const owner = { sub: "owner-sub", email: "owner@example.com", name: "Owner" };
+  await assert.rejects(
+    () => store.inviteCollaborator(room.code, { sub: "stranger", email: "s@example.com", name: "Sam" }, "alex@example.com"),
+    /Only people on this room/,
+  );
+  const invite = await store.inviteCollaborator(room.code, owner, "Alex@Example.com");
+  assert.equal(invite.email, "alex@example.com");
+  assert.equal(invite.invites.length, 1);
+  const again = await store.inviteCollaborator(room.code, owner, "alex@example.com");
+  assert.equal(again.token, invite.token);
+
+  const preview = await store.previewInvite(invite.token);
+  assert.equal(preview.title, "Friday meetup");
+  assert.equal(preview.email, "alex@example.com");
+  await assert.rejects(
+    () => store.acceptInvite(invite.token, { sub: "other", email: "other@example.com", name: "Other" }),
+    /different Google account/,
+  );
+  await assert.rejects(() => store.draw(room.code, "", "wheel", "alex-sub"), /Wrong pin/);
+
+  const host = await store.hostRoom(room.code, "", "owner-sub");
+  assert.equal(host.access, "owner");
+  assert.equal(host.invites[0].email, "alex@example.com");
+  const withPin = await store.hostRoom(room.code, room.pin, "stranger");
+  assert.equal(withPin.access, "pin");
+  assert.equal(withPin.invites, undefined);
+
+  const claimed = await store.roomsForUser({ sub: "alex-sub", email: "alex@example.com", name: "Alex" });
+  assert.equal(claimed.length, 1);
+  assert.equal(claimed[0].code, room.code);
+  assert.equal(claimed[0].role, "collaborator");
+  const draw = await store.draw(room.code, "", "wheel", "alex-sub");
+  assert.equal(draw.name, "Priya Shah");
+  const owners = await store.roomsForUser(owner);
+  assert.equal(owners[0].role, "owner");
+  assert.equal(owners[0].latestName, "Priya Shah");
+
+  await assert.rejects(
+    () => store.removeCollaborator(room.code, { sub: "alex-sub", email: "alex@example.com", name: "Alex" }, "alex@example.com"),
+    /opened the room/,
+  );
+  await store.removeCollaborator(room.code, owner, "alex@example.com");
+  assert.equal((await store.roomsForUser("alex-sub")).length, 0);
+  await assert.rejects(() => store.draw(room.code, "NOPE00", "wheel", "alex-sub"), /Wrong pin/);
+  await store.close();
+});
+
 test("sessions resolve to the google user", async () => {
   const store = await createStore(":memory:");
   await store.upsertUser({ sub: "sub-1", email: "sid@example.com", name: "Sid", picture: null });
