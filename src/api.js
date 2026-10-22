@@ -33,6 +33,12 @@ export const api = {
     request(`/api/rooms/${code}/reveal`, { method: "POST", pin, body: { reveal } }),
   importCsv: (code, pin, csv) =>
     request(`/api/rooms/${code}/import`, { method: "POST", pin, body: { csv } }),
+  me: async () => {
+    const data = await request("/api/auth/me");
+    return data.user;
+  },
+  rooms: () => request("/api/me/rooms"),
+  logout: () => request("/api/auth/logout", { method: "POST" }),
 };
 
 export function cleanCode(value) {

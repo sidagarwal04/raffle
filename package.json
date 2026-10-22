@@ -6,13 +6,15 @@
     "dev": "concurrently -k -n web,api -c cyan,magenta \"vite --host\" \"node --disable-warning=ExperimentalWarning --watch-path=server server/index.js\"",
     "build": "vite build",
     "start": "NODE_ENV=production node --disable-warning=ExperimentalWarning server/index.js",
-    "test": "node --disable-warning=ExperimentalWarning --test server/store.test.js"
+    "test": "node --disable-warning=ExperimentalWarning --test server/store.test.js server/blob-store.test.js"
   },
   "engines": {
     "node": ">=22"
   },
   "dependencies": {
+    "@netlify/blobs": "^11.1.6",
     "express": "^4.21.2",
+    "google-auth-library": "^11.3.1",
     "qrcode": "^1.5.4",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",

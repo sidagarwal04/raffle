@@ -32,6 +32,7 @@ export function Stage() {
   const [missing, setMissing] = useState(false);
   const [error, setError] = useState("");
   const [askPin, setAskPin] = useState(false);
+  const [tryHost, setTryHost] = useState(true);
   const [pinDraft, setPinDraft] = useState("");
   const [phase, setPhase] = useState("lobby");
   const [activeDraw, setActiveDraw] = useState(null);
@@ -40,8 +41,12 @@ export function Stage() {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [qr, setQr] = useState("");
+  const [presenting, setPresenting] = useState(false);
+  const [freshIds, setFreshIds] = useState([]);
   const played = useRef(loadPlayed(code));
   const firstLoad = useRef(true);
+  const knownIds = useRef(new Set());
+  const openedFullscreen = useRef(false);
 
   function remember(draw, animate) {
     if (!draw || played.current.has(draw.id)) return;
@@ -64,7 +69,7 @@ export function Stage() {
     let stop = false;
     async function tick() {
       try {
-        const next = pin ? await api.getHost(code, pin) : await api.getRoom(code);
+        const next = pin || tryHost ? await api.getHost(code, pin) : await api.getRoom(code);
         if (stop) return;
         setRoom(next);
         setMissing(false);
@@ -78,11 +83,23 @@ export function Stage() {
       } catch (err) {
         if (stop) return;
         if (err.status === 404) setMissing(true);
-        else if (err.status === 403 && pin) {
-          clearPin(code);
-          setPin("");
-          setError("That pin didn’t match. Enter it again.");
-          setAskPin(true);
+        else if (err.status === 403) {
+          if (pin) {
+            clearPin(code);
+            setPin("");
+            setError("That pin didn’t match. Enter it again.");
+            setAskPin(true);
+          }
+          setTryHost(false);
+          try {
+            const pub = await api.getRoom(code);
+            if (stop) return;
+            setRoom(pub);
+            setMissing(false);
+          } catch (inner) {
+            if (inner.status === 404) setMissing(true);
+            else setError(inner.message);
+          }
         } else setError(err.message);
       }
     }
@@ -92,7 +109,7 @@ export function Stage() {
       stop = true;
       clearInterval(id);
     };
-  }, [code, pin]);
+  }, [code, pin, tryHost]);
 
   useEffect(() => {
     if (room?.reveal) setReveal(room.reveal);
@@ -103,12 +120,54 @@ export function Stage() {
     document.title = room?.title ? `${room.title} · Spin Fiesta` : "Spin Fiesta";
   }, [room?.title]);
 
+  const entryKey = (room?.entries || []).map((entry) => entry.id).join("|");
+
+  useEffect(() => {
+    if (!presenting) {
+      knownIds.current = new Set();
+      return;
+    }
+    const ids = entryKey ? entryKey.split("|") : [];
+    const arrived = ids.filter((id) => !knownIds.current.has(id));
+    if (!arrived.length) return;
+    const firstPaint = knownIds.current.size === 0;
+    arrived.forEach((id) => knownIds.current.add(id));
+    setFreshIds(firstPaint ? ids : arrived);
+  }, [presenting, entryKey]);
+
+  useEffect(() => {
+    if (!presenting) return undefined;
+    function onKey(event) {
+      if (event.key === "Escape" && !document.fullscreenElement) setPresenting(false);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [presenting]);
+
+  function startPresent() {
+    setPresenting(true);
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().then(() => {
+        openedFullscreen.current = true;
+      }).catch(() => {});
+    }
+  }
+
+  function stopPresent() {
+    setPresenting(false);
+    if (openedFullscreen.current) {
+      openedFullscreen.current = false;
+      if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    }
+  }
+
   async function unlock(event) {
     event.preventDefault();
     setError("");
     try {
       const next = await api.getHost(code, pinDraft.trim());
       savePin(code, pinDraft.trim().toUpperCase());
+      setTryHost(true);
       setPin(pinDraft.trim().toUpperCase());
       setRoom(next);
       setAskPin(false);
@@ -211,19 +270,34 @@ export function Stage() {
   const showCode = room && room.style !== "booth";
   const joinUrl = `${location.origin}/j/${code}`;
   const localHint = location.hostname === "localhost" || location.hostname === "127.0.0.1";
+  const hosting = Boolean(room?.entries) && !presenting;
+  const people = [...(room?.entries || [])].sort((a, b) => b.joinedAt - a.joinedAt);
 
   return (
-    <div className={pin ? "stage-shell hosting" : "stage-shell"}>
-      <section className="stage">
+    <div className={hosting ? "stage-shell hosting" : "stage-shell"}>
+      <section className={presenting ? "stage presenting" : "stage"}>
         <header className="stage-top">
           <p className="mark">{room?.title || "Spin Fiesta"}</p>
           <p className="live">
             <span className="pip" />
             {room ? `${room.count} in the draw` : "Connecting"}
           </p>
-          <button className="text-btn" type="button" onClick={fullscreen}>
-            Fullscreen
-          </button>
+          {presenting ? (
+            <button className="text-btn" type="button" onClick={stopPresent}>
+              Exit
+            </button>
+          ) : (
+            <span className="stage-tools">
+              {room?.entries ? (
+                <button className="text-btn" type="button" onClick={startPresent}>
+                  Present
+                </button>
+              ) : null}
+              <button className="text-btn" type="button" onClick={fullscreen}>
+                Fullscreen
+              </button>
+            </span>
+          )}
         </header>
 
         <div className="stage-body">
@@ -247,7 +321,53 @@ export function Stage() {
               />
             </>
           ) : null}
-          {phase === "lobby" ? (
+          {phase === "lobby" && presenting ? (
+            <div className="present-lobby">
+              <div className="present-join">
+                {showCode ? (
+                  <>
+                    <p className="eyebrow">Join with this code</p>
+                    <h1 className="code present-code">{code}</h1>
+                  </>
+                ) : (
+                  <>
+                    <p className="eyebrow">Booth</p>
+                    <h1 className="booth-line present-booth">Scan the card at the table</h1>
+                  </>
+                )}
+                <p className="prize-lg">{room?.prize}</p>
+                {showCode && qr ? <img className="present-qr" src={qr} alt={`QR code to join ${code}`} /> : null}
+              </div>
+              <div className="name-wall" aria-live="polite">
+                {people.length ? (
+                  people.map((entry, index) => (
+                    <span
+                      key={entry.id}
+                      className={
+                        freshIds.includes(entry.id)
+                          ? entry.eligible
+                            ? "name-chip fresh"
+                            : "name-chip fresh out"
+                          : entry.eligible
+                            ? "name-chip"
+                            : "name-chip out"
+                      }
+                      style={
+                        freshIds.includes(entry.id) && freshIds.length > 1
+                          ? { animationDelay: `${Math.min(index, 18) * 45}ms` }
+                          : undefined
+                      }
+                    >
+                      {entry.name}
+                    </span>
+                  ))
+                ) : (
+                  <p className="lede">Names land here as people join.</p>
+                )}
+              </div>
+            </div>
+          ) : null}
+          {phase === "lobby" && !presenting ? (
             <div className="lobby">
               {showCode ? (
                 <>
@@ -274,7 +394,7 @@ export function Stage() {
         )}
 
         <footer className="stage-foot">
-          {showCode && qr ? (
+          {showCode && qr && !presenting ? (
             <div className="qr-block">
               <img src={qr} alt={`QR code to join ${code}`} />
               <span>{joinUrl.replace(/^https?:\/\//, "")}</span>
@@ -282,14 +402,14 @@ export function Stage() {
           ) : (
             <span />
           )}
-          {pin ? null : (
+          {room?.entries || presenting ? null : (
             <button className="text-btn" type="button" onClick={() => setAskPin(true)}>
               Host
             </button>
           )}
         </footer>
 
-        {askPin && !pin ? (
+        {askPin && !room?.entries ? (
           <form className="pin-card" onSubmit={unlock}>
             <label htmlFor="pin">Host pin</label>
             <div className="inline">
@@ -311,13 +431,17 @@ export function Stage() {
             </button>
           </form>
         ) : null}
-        {error && !pin ? <p className="stage-error">{error}</p> : null}
+        {error && !room?.entries ? <p className="stage-error">{error}</p> : null}
       </section>
 
-      {pin && room ? (
+      {hosting && room ? (
         <aside className="dock">
           <div className="dock-controls">
             <p className="mark">Host</p>
+            <button className="btn primary" type="button" onClick={startPresent}>
+              Present
+            </button>
+            <p className="muted">The big screen, without these controls. Names show up as people join.</p>
             <div className="reveal-picks" role="radiogroup" aria-label="How the name lands">
               {REVEALS.map((item) => (
                 <button

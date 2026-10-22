@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
+import { useSession } from "../Account.jsx";
 import { api, savePin } from "../api.js";
 
 const STYLES = [
@@ -21,6 +22,7 @@ const STYLES = [
 ];
 
 export function Create() {
+  const user = useSession();
   const [title, setTitle] = useState("");
   const [prize, setPrize] = useState("");
   const [style, setStyle] = useState("meetup");
@@ -53,6 +55,30 @@ export function Create() {
     }
   }
 
+  if (!room && user === undefined) {
+    return (
+      <main className="sheet">
+        <p className="lede">Checking sign-in…</p>
+      </main>
+    );
+  }
+
+  if (!room && !user) {
+    return (
+      <main className="sheet">
+        <p className="mark">New room</p>
+        <h1>Sign in to save the room.</h1>
+        <p className="lede">Google sign-in keeps the code and the draws on your account.</p>
+        <a className="btn primary" href="/api/auth/google?next=/draw">
+          Sign in with Google
+        </a>
+        <Link className="btn ghost" to="/">
+          Back home
+        </Link>
+      </main>
+    );
+  }
+
   if (room) {
     const joinUrl = `${location.origin}/j/${room.code}`;
     return (
@@ -60,7 +86,8 @@ export function Create() {
         <p className="mark">Room open</p>
         <h1 className="code-sm">{room.code}</h1>
         <p className="lede">
-          Share the code. Keep the pin on this computer. It unlocks Draw.
+          Share the code. This room is saved to your Google account. The pin unlocks Draw on a
+          screen that isn’t signed in.
         </p>
         <div className="secret">
           <span>Host pin</span>

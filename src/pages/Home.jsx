@@ -1,10 +1,35 @@
-import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import { cleanCode } from "../api.js";
+import { useEffect, useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { AccountBar, useSession } from "../Account.jsx";
+import { api, cleanCode } from "../api.js";
+
+const AUTH_NOTE = {
+  error: "Google sign-in didn’t complete. Try again.",
+  config: "Google sign-in needs a client id and secret in the environment.",
+};
 
 export function Home() {
   const navigate = useNavigate();
+  const [params] = useSearchParams();
+  const user = useSession();
   const [code, setCode] = useState("");
+  const [rooms, setRooms] = useState([]);
+
+  useEffect(() => {
+    if (!user) return undefined;
+    let stop = false;
+    api
+      .rooms()
+      .then((data) => {
+        if (!stop) setRooms(data.rooms || []);
+      })
+      .catch(() => {
+        if (!stop) setRooms([]);
+      });
+    return () => {
+      stop = true;
+    };
+  }, [user]);
 
   function join(event) {
     event.preventDefault();
@@ -15,11 +40,13 @@ export function Home() {
 
   return (
     <main className="sheet">
+      <AccountBar user={user} next="/" />
+      {AUTH_NOTE[params.get("auth")] ? <p className="error">{AUTH_NOTE[params.get("auth")]}</p> : null}
       <p className="mark">Spin Fiesta</p>
       <h1>A room. A code. A winner.</h1>
       <p className="lede">
         For meetups, booths, and livestreams. People join with a name. You draw
-        on the big screen.
+        on the big screen. Sign in with Google and the code stays on your account.
       </p>
       <Link className="btn primary" to="/draw">
         Create a room
@@ -42,6 +69,31 @@ export function Home() {
           </button>
         </div>
       </form>
+      {user ? (
+        <section className="saved-block">
+          <h2>Your rooms</h2>
+          {rooms.length ? (
+            <ul className="saved">
+              {rooms.map((room) => (
+                <li key={room.code}>
+                  <Link to={`/s/${room.code}`}>
+                    <span>
+                      <strong>{room.code}</strong>
+                      <em>
+                        {room.title}
+                        {room.latestName ? ` · ${room.latestName}` : " · No draw yet"}
+                      </em>
+                    </span>
+                    <em>{room.count} in</em>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="muted">Rooms you open are saved here.</p>
+          )}
+        </section>
+      ) : null}
     </main>
   );
 }
